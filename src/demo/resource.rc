@@ -1,0 +1,2 @@
+// Empty resource file. Drop your .ico / VERSIONINFO here.
+// Kept so CMake can reference it without platform-specific branching.
