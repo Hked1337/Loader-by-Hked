@@ -99,6 +99,62 @@ it. Communicate only via `LoaderHandle::SetStage / SetProgress / Log`.
 - **Window size**: tweak `LoaderConfig::width` / `height`. The layout is laid
   out in pixels relative to the window, so 560x360 is the tested default.
 
+## Anti-tamper / anti-debug
+
+The loader ships a best-effort protection layer under
+[`src/loader/security/`](src/loader/security/) that runs before the UI comes
+up and keeps running as a background watchdog.
+
+What it covers:
+
+- **Anti-debug** — `IsDebuggerPresent`, `CheckRemoteDebuggerPresent`, PEB
+  `BeingDebugged` + `NtGlobalFlag` read via `__readgsqword(0x60)`,
+  `NtQueryInformationProcess(ProcessDebugPort / Flags / ObjectHandle)`,
+  hardware-breakpoint detection via `GetThreadContext` Dr0-Dr3, and an
+  RDTSC-style skew check.
+- **Tool detection** — process snapshot vs. a blacklist (x64dbg, x32dbg,
+  OllyDbg, IDA, WinDbg, radare2, Cheat Engine, Scylla, HTTP Debugger,
+  Fiddler, Wireshark, Process Hacker, Ghidra, dnSpy) plus a window-class /
+  window-title scan for the same tools.
+- **Inline-hook detection** — reads the first bytes of a handful of
+  sensitive exports (`NtQueryInformationProcess`, `IsDebuggerPresent`,
+  `CheckRemoteDebuggerPresent`, `NtSetInformationThread`) and flags the
+  classic trampoline signatures (`E9`, `EB`, `FF 25`, `68 xx xx xx xx C3`).
+- **Reaction** — on detection the loader jumps into
+  [`Trap.cpp`](src/loader/security/Trap.cpp), which picks one of five
+  divergent crash strategies (null write, stack smash, unbounded recursion,
+  bogus non-canonical read, `RaiseFailFastException`). The selector is
+  hashed from `__LINE__ ^ HKED_TRAP_SEED`, and `HKED_TRAP_SEED` is
+  regenerated on every build - so the crash address is different each time
+  you ship.
+
+### Per-build string obfuscation
+
+Every literal wrapped in `OBF("...")` (narrow) or `OBFS("...")` is XOR-encrypted
+at compile time with a key derived from `HKED_OBF_SEED ^ __LINE__ ^ __COUNTER__`.
+The seed itself is rolled by
+[`cmake/WriteObfKey.cmake`](cmake/WriteObfKey.cmake) on every build into
+`generated/ObfKey.generated.h`, so two consecutive builds of the same source
+produce different ciphertext in `.rdata`. Strings are decrypted into a
+thread-local stack buffer on first touch; no heap, no persistent plaintext.
+
+### What this does *not* do
+
+- This is not a replacement for **VMProtect** / **Themida** / **Enigma**.
+  A motivated reverser with a custom kernel-mode debugger, hypervisor, or a
+  ScyllaHide build tuned for the detections above will still get through.
+- There is no licensing server, HWID binding, or network auth in this
+  module; it is strictly local anti-tamper scaffolding. Wire your own
+  license / HWID check in alongside it if you need one.
+
+### Turning reactions off during development
+
+While you are iterating on your own code under a debugger, the loader will
+crash the moment a debugger attaches. If you need to temporarily skip the
+checks, comment out the `hked::security::RunStartupChecks()` and
+`hked::security::StartWatchdog()` calls in `src/loader/Loader.cpp`, or wrap
+them in an `#if !defined(_DEBUG)` guard.
+
 ## Licenses
 
 - Source code in this repo: MIT-style (feel free to reuse; attribution

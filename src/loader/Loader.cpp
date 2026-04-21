@@ -2,6 +2,7 @@
 
 #include "Spinner.h"
 #include "Theme.h"
+#include "security/Security.h"
 
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -330,6 +331,11 @@ void DrawGradientBackground(ImDrawList* dl, ImVec2 a, ImVec2 b,
 // ===========================================================================
 
 bool RunLoader(const LoaderConfig& cfg) {
+    // Synchronous anti-tamper pass. On detection this never returns --
+    // control diverges into one of the Trap() strategies, which crash the
+    // process in a way that looks like a legitimate bug to casual reversers.
+    hked::security::RunStartupChecks();
+
     HINSTANCE hinst = GetModuleHandleW(nullptr);
 
     LoaderHandle handle;
@@ -359,6 +365,9 @@ bool RunLoader(const LoaderConfig& cfg) {
 
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplDX11_Init(d3d.device, d3d.context);
+
+    // Spawn the background anti-tamper watchdog now that the UI is up.
+    hked::security::StartWatchdog();
 
     // Kick off the worker.
     std::thread worker([&] {
@@ -565,6 +574,8 @@ bool RunLoader(const LoaderConfig& cfg) {
         handle.Cancel();
         worker.join();
     }
+
+    hked::security::StopWatchdog();
 
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
