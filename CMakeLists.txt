@@ -57,14 +57,39 @@ target_include_directories(imgui PUBLIC
 )
 target_link_libraries(imgui PUBLIC d3d11 dxgi dwmapi)
 
+# ---- Generated obfuscation key (regenerated every build) --------------------
+# WriteObfKey.cmake writes a header with a fresh 64-bit seed + mask + trap
+# selector. We wire it in as a custom target that has no output dependency
+# so it runs on every build; the script itself is idempotent when the seed
+# happens to round-trip to the same hex, so no-op rebuilds stay no-op.
+set(HKED_GENERATED_DIR ${CMAKE_BINARY_DIR}/generated)
+set(HKED_OBF_HEADER    ${HKED_GENERATED_DIR}/ObfKey.generated.h)
+file(MAKE_DIRECTORY ${HKED_GENERATED_DIR})
+
+add_custom_target(hked_gen_obfkey ALL
+    BYPRODUCTS ${HKED_OBF_HEADER}
+    COMMAND ${CMAKE_COMMAND}
+        -DOUT_HEADER=${HKED_OBF_HEADER}
+        -P ${CMAKE_SOURCE_DIR}/cmake/WriteObfKey.cmake
+    COMMENT "Rolling a fresh obfuscation key"
+    VERBATIM
+)
+
 # ---- Loader library ---------------------------------------------------------
 add_library(hked_loader STATIC
     src/loader/Loader.cpp
     src/loader/Theme.cpp
     src/loader/Spinner.cpp
+    src/loader/security/Security.cpp
+    src/loader/security/Trap.cpp
 )
-target_include_directories(hked_loader PUBLIC src)
+target_include_directories(hked_loader
+    PUBLIC  src
+    PRIVATE ${HKED_GENERATED_DIR}
+)
 target_link_libraries(hked_loader PUBLIC imgui)
+target_link_libraries(hked_loader PRIVATE psapi advapi32)
+add_dependencies(hked_loader hked_gen_obfkey)
 
 # ---- Demo executable --------------------------------------------------------
 add_executable(LoaderDemo WIN32
